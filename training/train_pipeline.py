@@ -1,7 +1,9 @@
-from utils.hparams import hparams
 import torch
 from torch.nn import functional as F
-from utils.pitch_utils import f0_to_coarse, denorm_f0, norm_f0
+
+from utils.hparams import hparams
+from utils.pitch_utils import f0_to_coarse, denorm_f0
+
 
 class Batch2Loss:
     '''
@@ -9,8 +11,8 @@ class Batch2Loss:
     '''
 
     @staticmethod
-    def insert1(pitch_midi, midi_dur, is_slur, # variables
-                midi_embed, midi_dur_layer, is_slur_embed): # modules
+    def insert1(pitch_midi, midi_dur, is_slur,  # variables
+                midi_embed, midi_dur_layer, is_slur_embed):  # modules
         '''
             add embeddings for midi, midi_dur, slur
         '''
@@ -23,8 +25,8 @@ class Batch2Loss:
         return midi_embedding, midi_dur_embedding, slur_embedding
 
     @staticmethod
-    def module1(fs2_encoder, # modules
-                txt_tokens, midi_embedding, midi_dur_embedding, slur_embedding): # variables
+    def module1(fs2_encoder,  # modules
+                txt_tokens, midi_embedding, midi_dur_embedding, slur_embedding):  # variables
         '''
             get *encoder_out* == fs2_encoder(*txt_tokens*, some embeddings)
         '''
@@ -32,8 +34,8 @@ class Batch2Loss:
         return encoder_out
 
     @staticmethod
-    def insert2(encoder_out, spk_embed_id, spk_embed_dur_id, spk_embed_f0_id, src_nonpadding, # variables
-                spk_embed_proj): # modules
+    def insert2(encoder_out, spk_embed_id, spk_embed_dur_id, spk_embed_f0_id, src_nonpadding,  # variables
+                spk_embed_proj):  # modules
         '''
             1. add embeddings for pspk, spk_dur, sk_f0
             2. get *dur_inp* ~= *encoder_out* + *spk_embed_dur*
@@ -65,32 +67,32 @@ class Batch2Loss:
         return var_embed, spk_embed, spk_embed_dur, spk_embed_f0, dur_inp
 
     @staticmethod
-    def module2(dur_predictor, length_regulator, # modules
-                dur_input, mel2ph, txt_tokens, all_vowel_tokens, ret, midi_dur=None): # variables
+    def module2(dur_predictor, length_regulator,  # modules
+                dur_input, mel2ph, txt_tokens, all_vowel_tokens, ret, midi_dur=None):  # variables
         '''
             1. get *dur* ~= dur_predictor(*dur_inp*)
             2. (mel2ph is None): get *mel2ph* ~= length_regulater(*dur*)
-        ''' 
+        '''
         src_padding = (txt_tokens == 0)
         dur_input = dur_input.detach() + hparams['predictor_grad'] * (dur_input - dur_input.detach())
-        
+
         if mel2ph is None:
             dur, xs = dur_predictor.inference(dur_input, src_padding)
             ret['dur'] = xs
             dur = xs.squeeze(-1).exp() - 1.0
             for i in range(len(dur)):
                 for j in range(len(dur[i])):
-                    if txt_tokens[i,j] in all_vowel_tokens:
-                        if j < len(dur[i])-1 and txt_tokens[i,j+1] not in all_vowel_tokens:
-                            dur[i,j] = midi_dur[i,j] - dur[i,j+1]
-                            if dur[i,j] < 0:
-                                dur[i,j] = 0
-                                dur[i,j+1] = midi_dur[i,j]
+                    if txt_tokens[i, j] in all_vowel_tokens:
+                        if j < len(dur[i]) - 1 and txt_tokens[i, j + 1] not in all_vowel_tokens:
+                            dur[i, j] = midi_dur[i, j] - dur[i, j + 1]
+                            if dur[i, j] < 0:
+                                dur[i, j] = 0
+                                dur[i, j + 1] = midi_dur[i, j]
                         else:
-                            dur[i,j]=midi_dur[i,j]      
-            dur[:,0] = dur[:,0] + 0.5
-            dur_acc = F.pad(torch.round(torch.cumsum(dur, axis=1)), (1,0))
-            dur = torch.clamp(dur_acc[:,1:]-dur_acc[:,:-1], min=0).long()
+                            dur[i, j] = midi_dur[i, j]
+            dur[:, 0] = dur[:, 0] + 0.5
+            dur_acc = F.pad(torch.round(torch.cumsum(dur, axis=1)), (1, 0))
+            dur = torch.clamp(dur_acc[:, 1:] - dur_acc[:, :-1], min=0).long()
             ret['dur_choice'] = dur
             mel2ph = length_regulator(dur, src_padding).detach()
         else:
@@ -98,9 +100,9 @@ class Batch2Loss:
         ret['mel2ph'] = mel2ph
 
         return mel2ph
-    
+
     @staticmethod
-    def insert3(encoder_out, mel2ph, var_embed, spk_embed_f0, src_nonpadding, tgt_nonpadding): # variables
+    def insert3(encoder_out, mel2ph, var_embed, spk_embed_f0, src_nonpadding, tgt_nonpadding):  # variables
         '''
             1. get *decoder_inp* ~= gather *encoder_out* according to *mel2ph*
             2. get *pitch_inp* ~= *decoder_inp* + *spk_embed_f0*
@@ -115,13 +117,14 @@ class Batch2Loss:
         return decoder_inp, pitch_inp, pitch_inp_ph
 
     @staticmethod
-    def module3(pitch_predictor, pitch_embed, energy_predictor, energy_embed, # modules
-                pitch_inp, pitch_inp_ph, f0, uv, energy, mel2ph, is_training, ret): # variables
+    def module3(pitch_predictor, pitch_embed, energy_predictor, energy_embed,  # modules
+                pitch_inp, pitch_inp_ph, f0, uv, energy, mel2ph, is_training, ret):  # variables
         '''
             1. get *ret['pitch_pred']*, *ret['energy_pred']* ~= pitch_predictor(*pitch_inp*), energy_predictor(*pitch_inp*)
             2. get *pitch_embedding* ~= pitch_embed(f0_to_coarse(denorm_f0(*f0* or *pitch_pred*))
             3. get *energy_embedding* ~= energy_embed(energy_to_coarse(*energy* or *energy_pred*))
         '''
+
         def add_pitch(decoder_inp, f0, uv, mel2ph, ret, encoder_out=None):
             if hparams['pitch_type'] == 'ph':
                 pitch_pred_inp = encoder_out.detach() + hparams['predictor_grad'] * (encoder_out - encoder_out.detach())
@@ -135,28 +138,12 @@ class Batch2Loss:
                 pitch = torch.gather(pitch, 1, mel2ph)  # [B, T_mel]
                 pitch_embedding = pitch_embed(pitch)
                 return pitch_embedding
-            
+
             decoder_inp = decoder_inp.detach() + hparams['predictor_grad'] * (decoder_inp - decoder_inp.detach())
 
             pitch_padding = (mel2ph == 0)
 
-            if hparams['pitch_type'] == 'cwt':
-                # NOTE: this part of script is *isolated* from other scripts, which means
-                #       it may not be compatible with the current version.    
-                pass
-                # pitch_padding = None
-                # ret['cwt'] = cwt_out = self.cwt_predictor(decoder_inp)
-                # stats_out = self.cwt_stats_layers(encoder_out[:, 0, :])  # [B, 2]
-                # mean = ret['f0_mean'] = stats_out[:, 0]
-                # std = ret['f0_std'] = stats_out[:, 1]
-                # cwt_spec = cwt_out[:, :, :10]
-                # if f0 is None:
-                #     std = std * hparams['cwt_std_scale']
-                #     f0 = self.cwt2f0_norm(cwt_spec, mean, std, mel2ph)
-                #     if hparams['use_uv']:
-                #         assert cwt_out.shape[-1] == 11
-                #         uv = cwt_out[:, :, -1] > 0
-            elif hparams['pitch_ar']:
+            if hparams['pitch_ar']:
                 ret['pitch_pred'] = pitch_pred = pitch_predictor(decoder_inp, f0 if is_training else None)
                 if f0 is None:
                     f0 = pitch_pred[:, :, 0]
@@ -179,7 +166,7 @@ class Batch2Loss:
             ret['energy_pred'] = energy_pred = energy_predictor(decoder_inp)[:, :, 0]
             if energy is None:
                 energy = energy_pred
-            energy = torch.clamp(energy * 256 // 4, max=255).long() # energy_to_coarse
+            energy = torch.clamp(energy * 256 // 4, max=255).long()  # energy_to_coarse
             energy_embedding = energy_embed(energy)
             return energy_embedding
 
@@ -191,37 +178,39 @@ class Batch2Loss:
             if f0 is not None:
                 delta_l = nframes - f0.size(1)
                 if delta_l > 0:
-                    f0 = torch.cat((f0,torch.FloatTensor([[x[-1]] * delta_l for x in f0]).to(f0.device)),1)
-                f0 = f0[:,:nframes]
+                    f0 = torch.cat((f0, torch.FloatTensor([[x[-1]] * delta_l for x in f0]).to(f0.device)), 1)
+                f0 = f0[:, :nframes]
             if uv is not None:
                 delta_l = nframes - uv.size(1)
                 if delta_l > 0:
-                    uv = torch.cat((uv,torch.FloatTensor([[x[-1]] * delta_l for x in uv]).to(uv.device)),1)
-                uv = uv[:,:nframes]
+                    uv = torch.cat((uv, torch.FloatTensor([[x[-1]] * delta_l for x in uv]).to(uv.device)), 1)
+                uv = uv[:, :nframes]
             pitch_embedding = add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph)
-           
+
         energy_embedding = 0
         if hparams['use_energy_embed']:
             if energy is not None:
                 delta_l = nframes - energy.size(1)
                 if delta_l > 0:
-                    energy = torch.cat((energy,torch.FloatTensor([[x[-1]] * delta_l for x in energy]).to(energy.device)),1)
-                energy = energy[:,:nframes]
+                    energy = torch.cat(
+                        (energy, torch.FloatTensor([[x[-1]] * delta_l for x in energy]).to(energy.device)), 1)
+                energy = energy[:, :nframes]
             energy_embedding = add_energy(pitch_inp, energy, ret)
-        
+
         return pitch_embedding, energy_embedding
-    
+
     @staticmethod
     def insert4(decoder_inp, pitch_embedding, energy_embedding, spk_embed, ret, tgt_nonpadding):
         '''
             *decoder_inp* ~= *decoder_inp* + embeddings for spk, pitch, energy
         '''
-        ret['decoder_inp'] = decoder_inp = (decoder_inp + pitch_embedding + energy_embedding + spk_embed) * tgt_nonpadding
+        ret['decoder_inp'] = decoder_inp = (
+                                                   decoder_inp + pitch_embedding + energy_embedding + spk_embed) * tgt_nonpadding
         return decoder_inp
 
     @staticmethod
-    def module4(diff_main_loss, # modules
-                norm_spec, decoder_inp_t, ret, K_step, batch_size, device): # variables
+    def module4(diff_main_loss,  # modules
+                norm_spec, decoder_inp_t, ret, K_step, batch_size, device):  # variables
         '''
             training diffusion using spec as input and decoder_inp as condition.
             

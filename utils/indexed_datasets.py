@@ -38,6 +38,7 @@ class IndexedDataset:
     def __len__(self):
         return len(self.data_offsets) - 1
 
+
 class IndexedDatasetBuilder:
     def __init__(self, path):
         self.path = path
@@ -57,6 +58,7 @@ class IndexedDatasetBuilder:
 if __name__ == "__main__":
     import random
     from tqdm import tqdm
+
     ds_path = '/tmp/indexed_ds_example'
     size = 100
     items = [{"a": np.random.normal(size=[10000, 10]),

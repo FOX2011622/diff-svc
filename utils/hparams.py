@@ -1,5 +1,6 @@
 import argparse
 import os
+
 import yaml
 
 global_print_hparams = True
@@ -20,7 +21,8 @@ def override_config(old_config: dict, new_config: dict):
             old_config[k] = v
 
 
-def set_hparams(config='', exp_name='', hparams_str='', print_hparams=True, global_hparams=True,reset=True,infer=True):
+def set_hparams(config='', exp_name='', hparams_str='', print_hparams=True, global_hparams=True, reset=True,
+                infer=True):
     '''
         Load hparams from multiple sources:
         1. config chain (i.e. first load base_config, then load config);
@@ -88,7 +90,7 @@ def set_hparams(config='', exp_name='', hparams_str='', print_hparams=True, glob
     hparams_ = {}
 
     hparams_.update(load_config(args.config))
-    
+
     if not args.reset:
         hparams_.update(saved_hparams)
     hparams_['work_dir'] = args_work_dir
@@ -106,7 +108,10 @@ def set_hparams(config='', exp_name='', hparams_str='', print_hparams=True, glob
     if args_work_dir != '' and (not os.path.exists(ckpt_config_path) or args.reset) and not args.infer:
         os.makedirs(hparams_['work_dir'], exist_ok=True)
         with open(ckpt_config_path, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(hparams_, f)
+            temp_haparams = hparams_
+            if 'base_config' in temp_haparams.keys():
+                del temp_haparams['base_config']
+            yaml.safe_dump(temp_haparams, f)
 
     hparams_['infer'] = args.infer
     hparams_['debug'] = args.debug

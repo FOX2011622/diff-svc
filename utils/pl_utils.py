@@ -484,7 +484,7 @@ class BaseTrainer:
         if self.use_ddp:
             mp.spawn(self.ddp_train, nprocs=self.num_gpus, args=(model,))
         else:
-            model.model = model.build_model()
+            model.svc_model = model.build_model()
             if not self.testing:
                 self.optimizers, self.lr_schedulers = self.init_optimizers(model.configure_optimizers())
             if self.use_dp:
@@ -882,7 +882,7 @@ class BaseTrainer:
 
         # CHOOSE OPTIMIZER
         # allow for lr schedulers as well
-        model.model = model.build_model()
+        model.svc_model = model.build_model()
         if not self.testing:
             self.optimizers, self.lr_schedulers = self.init_optimizers(model.configure_optimizers())
 

@@ -1,43 +1,67 @@
+import io
+import os.path
+from pathlib import Path
+
+import numpy as np
 import soundfile
 
 from infer_tools import infer_tool
 from infer_tools.infer_tool import Svc
+from infer_tools.trans_key import trans_opencpop
+from utils.hparams import hparams
+from tqdm import tqdm
 
-
-def run_clip(svc_model, key, acc, use_pe, use_crepe, thre, use_gt_mel, add_noise_step, project_name='', f_name=None,
-             file_path=None, out_path=None):
-    raw_audio_path = f_name
+def run_clip(raw_audio_path, svc_model, key, acc, use_crepe, spk_id=0, auto_key=False, use_gt_mel=False,
+             add_noise_step=500,
+             units_mode=False):
     infer_tool.format_wav(raw_audio_path)
-    _f0_tst, _f0_pred, _audio = svc_model.infer(raw_audio_path, key=key, acc=acc, singer=True, use_pe=use_pe,
-                                                use_crepe=use_crepe,
-                                                thre=thre, use_gt_mel=use_gt_mel, add_noise_step=add_noise_step)
-    out_path = f'./singer_data/{f_name.split("/")[-1]}'
-    soundfile.write(out_path, _audio, 44100, 'PCM_16')
+    key = svc_model.evaluate_key(raw_audio_path, key, auto_key)
+    _f0_tst, _f0_pred, _audio = svc_model.infer(raw_audio_path, key=key, acc=acc, use_crepe=use_crepe, spk_id=spk_id,
+                                                singer=not units_mode, use_gt_mel=use_gt_mel,
+                                                add_noise_step=add_noise_step)
+    if units_mode:
+        out_path = io.BytesIO()
+        soundfile.write(out_path, _audio, hparams["audio_sample_rate"], format='wav')
+        out_path.seek(0)
+        npy_path = Path(raw_audio_path).with_suffix(".npy")
+        np.save(str(npy_path), svc_model.hubert.encode(out_path))
+    else:
+        out_path = f'./singer_data/{Path(raw_audio_path).name}'
+        soundfile.write(out_path, _audio, hparams["audio_sample_rate"], 'PCM_16')
 
 
 if __name__ == '__main__':
     # 工程文件夹名，训练时用的那个
-    project_name = "firefox"
-    model_path = f'./checkpoints/{project_name}/clean_model_ckpt_steps_100000.ckpt'
+    project_name = "yunhao_new"
+    model_path = f'./checkpoints/{project_name}/model_ckpt_steps_205000.ckpt'
     config_path = f'./checkpoints/{project_name}/config.yaml'
 
-    # 支持多个wav/ogg文件，放在raw文件夹下，带扩展名
-    file_names = infer_tool.get_end_file("./batch", "wav")
-    trans = [-6]  # 音高调整，支持正负（半音），数量与上一行对应，不足的自动按第一个移调参数补齐
+    # 此脚本为批量导出短音频（30s内）使用，同时生成f0、mel供diffsinger使用。
+    # 支持wav文件，放在batch文件夹下，带扩展名
+    wav_paths = infer_tool.get_end_file("./data/Dingdang", "wav")
+    trans = 0  # 音高调整，支持正负（半音）
+    # 特化专用，开启此项后，仅导出变更音色的units至batch目录，其余项不输出；关闭此项则切换为对接diffsinger的套娃导出模式
+    units = True
+    # 自适应变调，不懂别开
+    auto_key = False
     # 加速倍数
-    accelerate = 50
-    hubert_gpu = True
-    cut_time = 30
+    accelerate = 10
+    spk_id = 0
+    # 仅支持opencpop标注文件，配合上方移调；使用时自行修改文件名、输出名（带txt后缀）
+    if not units:
+        trans_opencpop("transcriptions.txt", "res.txt", trans)
 
     # 下面不动
-    infer_tool.mkdir(["./batch", "./singer_data"])
-    infer_tool.fill_a_to_b(trans, file_names)
-
-    model = Svc(project_name, config_path, hubert_gpu, model_path)
+    os.makedirs("./singer_data", exist_ok=True)
+    model = Svc(project_name, config_path, hubert_gpu=True, model_path=model_path)
     count = 0
-    for f_name, tran in zip(file_names, trans):
-        print(f_name)
-        run_clip(model, key=tran, acc=accelerate, use_crepe=False, thre=0.05, use_pe=False, use_gt_mel=False,
-                 add_noise_step=500, f_name=f_name, project_name=project_name)
-        count += 1
-        print(f"process:{round(count * 100 / len(file_names), 2)}%")
+    with tqdm(total=len(wav_paths)) as p_bar:
+        p_bar.set_description('Processing')
+        for audio_path in wav_paths:
+
+            if os.path.exists(Path(audio_path).with_suffix(".npy")) and units:
+                print(f"{audio_path}:units已存在，跳过")
+                continue
+            run_clip(audio_path, model, trans, accelerate, spk_id=spk_id, auto_key=auto_key, use_crepe=False,
+                     units_mode=units)
+            p_bar.update(1)
